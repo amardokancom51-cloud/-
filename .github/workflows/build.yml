@@ -44,12 +44,10 @@ jobs:
           fi
 
           echo "Found ZIP: $ZIP_FILE"
-          unzip -q "$ZIP_FILE" -d project
-
-      - name: Build Debug APK
-        working-directory: project
-        run: |
-          gradle assembleDebug --stacktrace
+           unzip -q "$ZIP_FILE" -d project
+           sed -i '/signingConfig = signingConfigs.getByName("debugConfig")/d' project/app/build.gradle.kts  - name: Build Debug APK
+          working-directory: project
+         run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
