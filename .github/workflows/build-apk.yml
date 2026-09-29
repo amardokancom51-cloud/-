@@ -1,4 +1,4 @@
-name: Build আমার ওষুধের খাতা APK
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -15,20 +15,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK 36
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
       - name: Extract Android project
+        shell: bash
         run: |
           mkdir -p project
 
@@ -42,45 +35,75 @@ jobs:
           echo "Found ZIP: $ZIP_FILE"
           unzip -q "$ZIP_FILE" -d project
 
-      - name: Find Android project
-        run: |
-          SETTINGS=$(find project -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            | head -n 1)
+          echo "Project files:"
+          find project -maxdepth 3 -type f | head -100
 
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Android project not found"
-            find project -maxdepth 4 -type f
+          # Remove invalid debugConfig signing
+          if [ -f "project/app/build.gradle.kts" ]; then
+            sed -i '/signingConfig = signingConfigs.getByName("debugConfig")/d' project/app/build.gradle.kts
+          fi
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses || true
+
+          sdkmanager "platform-tools"
+
+          COMPILE_SDK=$(grep -RhoE 'compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+' project 2>/dev/null | grep -oE '[0-9]+' | head -n 1)
+
+          if [ -z "$COMPILE_SDK" ]; then
+            COMPILE_SDK=35
+          fi
+
+          echo "Using Android SDK: $COMPILE_SDK"
+
+          sdkmanager "platforms;android-$COMPILE_SDK"
+
+      - name: Find Gradle project
+        shell: bash
+        run: |
+          echo "Searching for Gradle project..."
+
+          GRADLE_FILE=$(find project -name "gradlew" -type f | head -n 1)
+
+          if [ -z "$GRADLE_FILE" ]; then
+            echo "ERROR: gradlew not found"
+            find project -maxdepth 4 -type f | sort
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Found Gradle wrapper: $GRADLE_FILE"
 
+          chmod +x "$GRADLE_FILE"
+
+          PROJECT_DIR=$(dirname "$GRADLE_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project found:"
-          echo "$PROJECT_DIR"
-
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
       - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          gradle assembleDebug --no-daemon
+          cd "$PROJECT_DIR"
+
+          chmod +x ./gradlew
+
+          ./gradlew assembleDebug --stacktrace
 
       - name: Find APK
+        shell: bash
         run: |
-          echo "APK files:"
+          echo "Searching for APK..."
+
           find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: amar-oushodher-khata-apk
+          name: Android-APK
           path: |
-            ${{ env.PROJECT_DIR }}/**/build/outputs/apk/**/*.apk
-            ${{ env.PROJECT_DIR }}/**/build/outputs/apk/*.apk
+            project/**/build/outputs/apk/**/*.apk
+            project/**/build/outputs/apk/*.apk
           if-no-files-found: error
